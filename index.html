@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Sandbox Builder live</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background-color: #020617; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        
+        .glass {
+            background: rgba(10, 15, 30, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(34, 211, 238, 0.15);
+            box-shadow: 0 10px 30px -10px rgba(0,0,0,0.8);
+        }
+
+        #toast {
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            opacity: 0;
+            transform: translateY(20px) scale(0.9);
+        }
+        #toast.show {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        #video-container {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            width: 180px;
+            height: 135px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid rgba(56, 189, 248, 0.4);
+            box-shadow: 0 15px 20px -5px rgba(0,0,0,0.6);
+            z-index: 50;
+        }
+        #webcam-video, #guidance-canvas {
+            position: absolute;
+            width: 100%; height: 100%;
+            transform: scaleX(-1);
+            object-fit: cover;
+        }
+
+        #tool-bar {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 60;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            max-width: 95%;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 12px;
+            border-radius: 20px;
+        }
+
+        .tool-btn {
+            padding: 10px 16px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            border-radius: 14px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .tool-btn:hover {
+            transform: scale(1.08) translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.7);
+        }
+
+        @media (max-width: 640px) {
+            #tool-bar {
+                top: 8px;
+                right: 8px;
+                padding: 8px;
+                gap: 8px;
+                overflow-x: auto;
+            }
+            .tool-btn {
+                padding: 8px 12px;
+                font-size: 0.8rem;
+                min-width: 85px;
+            }
+        }
+
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container" class="absolute inset-0"></div>
+
+    <div id="ui-layer" class="absolute inset-0 pointer-events-none p-4 md:p-8">
+
+        <div class="flex justify-between items-start">
+            <div class="flex flex-col gap-1 pointer-events-auto">
+                <h1 class="text-white text-2xl md:text-3xl font-black tracking-tighter italic uppercase">Sandbox <span class="text-blue-500">v3</span></h1>
+                <div id="status-indicator" class="glass inline-flex items-center px-4 py-2 rounded-full self-start shadow-lg">
+                    <span id="status-dot" class="w-3 h-3 rounded-full bg-yellow-500 mr-3 animate-pulse shadow-[0_0_10px_#eab308]"></span>
+                    <span id="status-text" class="text-sm font-bold uppercase tracking-widest text-slate-200">Searching...</span>
+                </div>
+            </div>
+
+            <div id="toast" class="glass px-6 py-3 rounded-2xl shadow-2xl pointer-events-auto">
+                <p class="text-blue-400 text-sm font-bold tracking-wide uppercase">Progress Auto-Saved</p>
+            </div>
+        </div>
+
+        <!-- TOOL-BAR UPGRADED – CAPSULE UDAH DIKERAT MATI -->
+        <div id="tool-bar" class="glass">
+
+            <button onclick="spawnObject('box', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-blue-700/90 text-white border border-blue-500/30 hover:border-blue-400">
+                <span>Block</span>
+                <div class="w-5 h-5 bg-blue-400 rounded-lg group-hover:bg-white shadow-[0_0_12px_#3b82f6]"></div>
+            </button>
+
+            <button onclick="spawnObject('cylinder', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-purple-700/90 text-white border border-purple-500/30 hover:border-purple-400">
+                <span>Pillar</span>
+                <div class="w-5 h-5 bg-purple-400 rounded-full group-hover:bg-white shadow-[0_0_12px_#a855f7]"></div>
+            </button>
+
+            <button onclick="spawnObject('beam', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-orange-700/90 text-white border border-orange-500/30 hover:border-orange-400">
+                <span>Beam</span>
+                <div class="w-7 h-4 bg-orange-400 rounded group-hover:bg-white shadow-[0_0_12px_#f97316]"></div>
+            </button>
+
+            <button onclick="spawnObject('sphere', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-red-700/90 text-white border border-red-500/30 hover:border-red-400">
+                <span>Sphere</span>
+                <div class="w-5 h-5 bg-red-500 rounded-full group-hover:bg-white shadow-[0_0_12px_#ef4444]"></div>
+            </button>
+
+            <button onclick="spawnObject('cone', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-green-700/90 text-white border border-green-500/30 hover:border-green-400">
+                <span>Cone</span>
+                <div class="w-5 h-5 bg-green-500 rounded group-hover:bg-white shadow-[0_0_12px_#10b981]"></div>
+            </button>
+
+            <button onclick="spawnObject('torus', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-yellow-700/90 text-white border border-yellow-500/30 hover:border-yellow-400">
+                <span>Torus</span>
+                <div class="w-5 h-5 bg-yellow-400 rounded-full group-hover:bg-white shadow-[0_0_12px_#eab308]"></div>
+            </button>
+
+            <button onclick="spawnObject('pyramid', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-gray-700/90 text-white border border-gray-500/30 hover:border-gray-400">
+                <span>Pyramid</span>
+                <div class="w-5 h-5 bg-gray-400 rounded group-hover:bg-white shadow-[0_0_12px_#9ca3af]"></div>
+            </button>
+
+            <button onclick="spawnObject('octahedron', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-violet-700/90 text-white border border-violet-500/30 hover:border-violet-400">
+                <span>Octa</span>
+                <div class="w-5 h-5 bg-violet-500 rounded group-hover:bg-white shadow-[0_0_12px_#8b5cf6]"></div>
+            </button>
+
+            <button onclick="spawnObject('dodecahedron', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-amber-700/90 text-white border border-amber-500/30 hover:border-amber-400">
+                <span>Dodeca</span>
+                <div class="w-5 h-5 bg-amber-400 rounded group-hover:bg-white shadow-[0_0_12px_#d97706]"></div>
+            </button>
+
+            <button onclick="spawnObject('icosahedron', 0, 15, 0)" class="tool-btn group flex items-center gap-3 bg-slate-800/70 hover:bg-cyan-700/90 text-white border border-cyan-500/30 hover:border-cyan-400">
+                <span>Icosa</span>
+                <div class="w-5 h-5 bg-cyan-400 rounded group-hover:bg-white shadow-[0_0_12px_#06b6d4]"></div>
+            </button>
+
+            <button onclick="clearAll()" class="tool-btn group bg-red-950/80 hover:bg-red-800/90 text-red-200 hover:text-white border border-red-700/50 hover:border-red-500 font-extrabold uppercase tracking-wider shadow-[0_0_15px_rgba(239,68,68,0.4)] hover:shadow-[0_0_30px_rgba(239,68,68,0.7)] animate-pulse-slow">
+                Reset All
+            </button>
+
+            <!-- KHOLIDDZZ SIGNATURE TETEP SADIS DI UJUNG -->
+            <a href="https://www.tiktok.com/@kholiddzz?_r=1&_t=ZS-94jCH4I38Td" 
+               target="_blank" 
+               rel="noopener noreferrer"
+               class="tool-btn group flex items-center gap-3 bg-gradient-to-r from-cyan-900/70 to-blue-900/70 hover:from-cyan-700/90 hover:to-blue-700/90 text-cyan-300 hover:text-white border border-cyan-400/50 hover:border-cyan-300 font-bold italic tracking-widest text-lg shadow-[0_0_20px_rgba(34,211,238,0.6)] hover:shadow-[0_0_40px_rgba(34,211,238,0.9)] animate-pulse-slow">
+                <span>kholiddzz</span>
+                <span class="text-xl group-hover:scale-125 transition-transform"></span>
+            </a>
+        </div>
+
+    </div>
+
+    <div id="loading-screen" class="absolute inset-0 z-50 bg-[#020617] flex flex-col items-center justify-center">
+        <div class="relative w-24 h-24 mb-8">
+            <div class="absolute inset-0 border-4 border-blue-500/30 rounded-full"></div>
+            <div class="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+        <h2 class="text-white text-2xl font-black tracking-widest uppercase">Hello Leon</h2>
+        <p class="text-slate-400 mt-3 text-sm tracking-[0.4em] animate-pulse">Initializing Neural Interface...</p>
+    </div>
+
+    <div id="video-container">
+        <video id="webcam-video" autoplay playsinline></video>
+        <canvas id="guidance-canvas"></canvas>
+    </div>
+
+    <script>
+        const GRAVITY_STRENGTH = 0.08;
+        const PINCH_THRESHOLD = 3.0;
+        const STORAGE_KEY = 'leon_sandbox_data';
+        
+        let scene, camera, renderer, isHandActive = false;
+        let objects = [], handMeshes = [];
+        let grabbedObjects = [null, null];
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color('#020617');
+            scene.fog = new THREE.Fog('#020617', 30, 90);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 25, 50);
+            camera.lookAt(0, 5, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const spotLight = new THREE.PointLight(0x3b82f6, 1, 100);
+            spotLight.position.set(0, 30, 0);
+            scene.add(spotLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            dirLight.position.set(20, 40, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(200, 200),
+                new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.9 })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const grid = new THREE.GridHelper(100, 40, '#1e293b', '#0f172a');
+            scene.add(grid);
+
+            setupHandVisuals();
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function setupHandVisuals() {
+            const jointGeom = new THREE.SphereGeometry(0.3, 12, 12);
+            const lineMat = new THREE.LineBasicMaterial({ color: '#0ea5e9', transparent: true, opacity: 0.5 });
+
+            for (let h = 0; h < 2; h++) {
+                const joints = [];
+                const lines = [];
+                const connections = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+
+                const jointMat = new THREE.MeshBasicMaterial({ color: h === 0 ? '#0ea5e9' : '#ff69b4' });
+
+                for (let i = 0; i < 21; i++) {
+                    const m = new THREE.Mesh(jointGeom, jointMat);
+                    m.visible = false;
+                    scene.add(m);
+                    joints.push(m);
+                }
+
+                connections.forEach(() => {
+                    const g = new THREE.BufferGeometry();
+                    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+                    const l = new THREE.LineSegments(g, lineMat);
+                    l.visible = false;
+                    scene.add(l);
+                    lines.push(l);
+                });
+
+                handMeshes.push({ joints, lines, connections });
+            }
+        }
+
+        function spawnObject(type, x, y, z, isLoad = false) {
+            let geom, color, halfSize = {x: 2, y: 2, z: 2};
+
+            switch(type) {
+                case 'box':
+                    geom = new THREE.BoxGeometry(4,4,4);
+                    color = '#3b82f6';
+                    break;
+                case 'cylinder':
+                    geom = new THREE.CylinderGeometry(2,2,6,32);
+                    color = '#a855f7';
+                    halfSize = {x:2, y:3, z:2};
+                    break;
+                case 'beam':
+                    geom = new THREE.BoxGeometry(10,2,4);
+                    color = '#f97316';
+                    halfSize = {x:5, y:1, z:2};
+                    break;
+                case 'sphere':
+                    geom = new THREE.SphereGeometry(2.5, 32, 32);
+                    color = '#ef4444';
+                    halfSize = {x:2.5, y:2.5, z:2.5};
+                    break;
+                case 'cone':
+                    geom = new THREE.ConeGeometry(3, 8, 32);
+                    color = '#10b981';
+                    halfSize = {x:3, y:4, z:3};
+                    break;
+                case 'torus':
+                    geom = new THREE.TorusGeometry(4, 1.5, 16, 100);
+                    color = '#eab308';
+                    halfSize = {x:5.5, y:1.5, z:5.5};
+                    break;
+                case 'pyramid':
+                    geom = new THREE.ConeGeometry(3, 7, 4, 1);
+                    color = '#1f2937';
+                    halfSize = {x:3, y:3.5, z:3};
+                    break;
+                case 'octahedron':
+                    geom = new THREE.OctahedronGeometry(2.5);
+                    color = '#7c3aed';
+                    halfSize = {x:2.5, y:2.5, z:2.5};
+                    break;
+                case 'dodecahedron':
+                    geom = new THREE.DodecahedronGeometry(2.5);
+                    color = '#d97706';
+                    halfSize = {x:2.5, y:2.5, z:2.5};
+                    break;
+                case 'icosahedron':
+                    geom = new THREE.IcosahedronGeometry(2.5);
+                    color = '#06b6d4';
+                    halfSize = {x:2.5, y:2.5, z:2.5};
+                    break;
+                default:
+                    return;
+            }
+
+            const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.1 }));
+            mesh.position.set(x, y, z);
+            mesh.castShadow = mesh.receiveShadow = true;
+            mesh.userData = { 
+                type, 
+                velocity: {y:0}, 
+                isGrabbed: false, 
+                halfSize, 
+                prevPos: mesh.position.clone() 
+            };
+            
+            scene.add(mesh);
+            objects.push(mesh);
+            if(!isLoad) saveData();
+        }
+
+        function updatePhysics() {
+            const ray = new THREE.Raycaster();
+            const down = new THREE.Vector3(0,-1,0);
+
+            objects.forEach(obj => {
+                if(obj.userData.isGrabbed) return;
+                
+                obj.userData.velocity.y -= GRAVITY_STRENGTH;
+                let nextY = obj.position.y + obj.userData.velocity.y;
+                let collided = false;
+
+                if (nextY - obj.userData.halfSize.y < 0) {
+                    obj.position.y = obj.userData.halfSize.y;
+                    obj.userData.velocity.y = 0;
+                    collided = true;
+                }
+
+                const collidables = objects.filter(o => o !== obj);
+                ray.set(new THREE.Vector3(obj.position.x, obj.position.y - obj.userData.halfSize.y + 0.1, obj.position.z), down);
+                const hits = ray.intersectObjects(collidables);
+
+                if(hits.length > 0 && hits[0].distance < Math.abs(obj.userData.velocity.y) + 0.2) {
+                    obj.position.y = hits[0].point.y + obj.userData.halfSize.y;
+                    obj.userData.velocity.y = 0;
+                    collided = true;
+                }
+
+                if(!collided) obj.position.y = nextY;
+            });
+        }
+
+        function handleHands(multiHandLandmarks) {
+            handMeshes.forEach(hand => {
+                hand.joints.forEach(j => j.visible = false);
+                hand.lines.forEach(l => l.visible = false);
+            });
+
+            grabbedObjects.forEach((g, idx) => {
+                if (g && !multiHandLandmarks[idx]) {
+                    g.userData.isGrabbed = false;
+                    grabbedObjects[idx] = null;
+                    saveData();
+                }
+            });
+
+            multiHandLandmarks.forEach((hand, handIndex) => {
+                if (handIndex >= handMeshes.length) return;
+                const handMesh = handMeshes[handIndex];
+
+                const mapX = (x) => (x - 0.5) * -50;
+                const mapY = (y) => (1 - y) * 35;
+                const mapZ = (z) => z * 40;
+
+                hand.forEach((lm, i) => {
+                    handMesh.joints[i].position.set(mapX(lm.x), mapY(lm.y), mapZ(lm.z));
+                    handMesh.joints[i].visible = true;
+                });
+
+                handMesh.connections.forEach((conn, i) => {
+                    const p1 = handMesh.joints[conn[0]].position;
+                    const p2 = handMesh.joints[conn[1]].position;
+                    const pos = handMesh.lines[i].geometry.attributes.position.array;
+                    pos[0]=p1.x; pos[1]=p1.y; pos[2]=p1.z; pos[3]=p2.x; pos[4]=p2.y; pos[5]=p2.z;
+                    handMesh.lines[i].geometry.attributes.position.needsUpdate = true;
+                    handMesh.lines[i].visible = true;
+                });
+
+                const thumb = handMesh.joints[4].position;
+                const index = handMesh.joints[8].position;
+                const pinchDist = thumb.distanceTo(index);
+
+                if (pinchDist < PINCH_THRESHOLD) {
+                    if (!grabbedObjects[handIndex]) {
+                        let minD = 12;
+                        let closest = null;
+                        objects.forEach(o => {
+                            let d = index.distanceTo(o.position);
+                            if (d < minD) {
+                                minD = d;
+                                closest = o;
+                            }
+                        });
+                        if (closest) {
+                            closest.userData.isGrabbed = true;
+                            grabbedObjects[handIndex] = closest;
+                        }
+                    }
+
+                    if (grabbedObjects[handIndex]) {
+                        const target = new THREE.Vector3(index.x, index.y, index.z);
+
+                        if (grabbedObjects[0] === grabbedObjects[1] && grabbedObjects[0]) {
+                            const otherIndex = handIndex === 0 ? 1 : 0;
+                            const otherHandMesh = handMeshes[otherIndex];
+                            const otherPinch = otherHandMesh.joints[8].position;
+                            target.lerp(otherPinch, 0.5);
+                        }
+
+                        grabbedObjects[handIndex].position.lerp(target, 0.4);
+                    }
+                } else if (grabbedObjects[handIndex]) {
+                    grabbedObjects[handIndex].userData.isGrabbed = false;
+                    grabbedObjects[handIndex] = null;
+                    saveData();
+                }
+            });
+        }
+
+        function initMediaPipe() {
+            const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+            hands.setOptions({ 
+                maxNumHands: 2,
+                modelComplexity: 1, 
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.5 
+            });
+            hands.onResults((res) => {
+                const ctx = document.getElementById('guidance-canvas').getContext('2d');
+                ctx.clearRect(0,0,320,240);
+
+                if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                    updateStatus(true);
+                    handleHands(res.multiHandLandmarks);
+                    document.getElementById('loading-screen').style.display = 'none';
+                } else {
+                    updateStatus(false);
+                    handMeshes.forEach(hand => {
+                        hand.joints.forEach(j => j.visible = false);
+                        hand.lines.forEach(l => l.visible = false);
+                    });
+                    grabbedObjects.forEach((g, i) => {
+                        if (g) {
+                            g.userData.isGrabbed = false;
+                            grabbedObjects[i] = null;
+                        }
+                    });
+                    saveData();
+                }
+            });
+            const cam = new Camera(document.getElementById('webcam-video'), {
+                onFrame: async () => await hands.send({image: document.getElementById('webcam-video')}),
+                width: 320, height: 240
+            });
+            cam.start();
+        }
+
+        function updateStatus(active) {
+            isHandActive = active;
+            const dot = document.getElementById('status-dot');
+            const txt = document.getElementById('status-text');
+            dot.className = active ? "w-3 h-3 rounded-full bg-blue-400 mr-3 shadow-[0_0_12px_#60a5fa]" : "w-3 h-3 rounded-full bg-yellow-500 mr-3 animate-pulse";
+            txt.innerText = active ? "System Active (2 Hands)" : "Searching...";
+            txt.className = active ? "text-sm font-bold uppercase tracking-widest text-blue-400" : "text-sm font-bold uppercase tracking-widest text-slate-400";
+        }
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(objects.map(o => ({type: o.userData.type, x: o.position.x, y: o.position.y, z: o.position.z}))));
+            const t = document.getElementById('toast');
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2000);
+        }
+
+        function clearAll() { 
+            objects.forEach(o => scene.remove(o)); 
+            objects = []; 
+            grabbedObjects = [null, null];
+            saveData(); 
+        }
+        
+        window.onload = () => {
+            initThreeJS();
+            const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+            data.forEach(d => spawnObject(d.type, d.x, d.y, d.z, true));
+            initMediaPipe();
+            (function anim() { 
+                requestAnimationFrame(anim); 
+                updatePhysics(); 
+                renderer.render(scene, camera); 
+            })();
+        };
+    </script>
+</body>
+</html>
